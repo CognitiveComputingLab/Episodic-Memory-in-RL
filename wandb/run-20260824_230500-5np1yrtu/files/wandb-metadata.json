@@ -1,0 +1,39 @@
+{
+  "os": "Windows-11-10.0.26200-SP0",
+  "python": "CPython 3.12.4",
+  "startedAt": "2026-08-24T22:05:00.046148Z",
+  "program": "D:\\University\\PhD\\DecisionTitan\\test.py",
+  "codePath": "test.py",
+  "codePathLocal": "test.py",
+  "git": {
+    "commit": "f53311ace60f13e280b096de8478b015accb222f"
+  },
+  "email": "j4waide@gmail.com",
+  "root": "D:\\University\\PhD\\DecisionTitan",
+  "host": "LAPTOP-OUR26CSF",
+  "executable": "C:\\Users\\j4wai\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+  "cpu_count": 6,
+  "cpu_count_logical": 12,
+  "gpu": "NVIDIA GeForce GTX 1660 Ti",
+  "gpu_count": 1,
+  "disk": {
+    "/": {
+      "total": "1000186310656",
+      "used": "743361060864"
+    }
+  },
+  "memory": {
+    "total": "16556683264"
+  },
+  "gpu_nvidia": [
+    {
+      "name": "NVIDIA GeForce GTX 1660 Ti",
+      "memoryTotal": "6442450944",
+      "cudaCores": 1536,
+      "architecture": "Turing",
+      "uuid": "GPU-63455e31-838c-e021-f840-a9a06cf32c63"
+    }
+  ],
+  "cudaVersion": "13.2",
+  "writerId": "jpftkghb9x8d2uvp5fquzgeuj7naxypw"
+}

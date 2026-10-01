@@ -1,0 +1,6 @@
+Triangular trainer - need to discuss stale gradients over the course of an episode
+ELMUR
+When to reset to M0? - Probably only M0 at the beginning as then training/eval dist shift. Gate to gradually return to M0?
+Adjust the block mask for attention on DTi for persistent tokens
+Ensure fully seeded randomness
+Random detach starting point for episode trainer

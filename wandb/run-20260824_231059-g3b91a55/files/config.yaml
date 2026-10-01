@@ -1,0 +1,102 @@
+_wandb:
+    value:
+        cli_version: 0.23.0
+        e:
+            1777as9fl4q7x7fqr3v38tv32xys7wiy:
+                codePath: test.py
+                codePathLocal: test.py
+                cpu_count: 6
+                cpu_count_logical: 12
+                cudaVersion: "13.2"
+                disk:
+                    /:
+                        total: "1000186310656"
+                        used: "743362920448"
+                email: j4waide@gmail.com
+                executable: C:\Users\j4wai\AppData\Local\Programs\Python\Python312\python.exe
+                git:
+                    commit: f53311ace60f13e280b096de8478b015accb222f
+                gpu: NVIDIA GeForce GTX 1660 Ti
+                gpu_count: 1
+                gpu_nvidia:
+                    - architecture: Turing
+                      cudaCores: 1536
+                      memoryTotal: "6442450944"
+                      name: NVIDIA GeForce GTX 1660 Ti
+                      uuid: GPU-63455e31-838c-e021-f840-a9a06cf32c63
+                host: LAPTOP-OUR26CSF
+                memory:
+                    total: "16556683264"
+                os: Windows-11-10.0.26200-SP0
+                program: D:\University\PhD\DecisionTitan\test.py
+                python: CPython 3.12.4
+                root: D:\University\PhD\DecisionTitan
+                startedAt: "2026-08-24T22:10:59.021780Z"
+                writerId: 1777as9fl4q7x7fqr3v38tv32xys7wiy
+        m: []
+        python_version: 3.12.4
+        t:
+            "1":
+                - 1
+                - 105
+            "2":
+                - 1
+                - 105
+            "3":
+                - 13
+                - 16
+                - 61
+            "4": 3.12.4
+            "5": 0.23.0
+            "8":
+                - 3
+            "12": 0.23.0
+            "13": windows-amd64
+dataset:
+    value:
+        workers: 4
+env:
+    value:
+        clip: null
+        encoding: onehot_repeat
+        episodes: 1000
+        instruction_every: 1
+        max_action: 1
+        max_corridor_len: 7
+        max_ep_len: 10
+        max_instructions: 2
+        min_corridor_len: 6
+        min_instructions: 1
+        possible_instructions: 2
+        reward_scaling: 1
+model:
+    value:
+        block_layout: mal_blocks
+        context_len: 5
+        embed_dim: 32
+        heads: 1
+        layers: 3
+        mini_batch_size: 15
+        num_persistent: 3
+        time_embed: global_sinusoidal
+        titan_layers:
+            - 1
+train:
+    value:
+        batch_size: 64
+        batches: 1000
+        checkpoint_every: 100
+        checkpoint_path: ./checkpoints/test
+        detach_every: null
+        device: cuda
+        do_wandb: true
+        eval_eps: 15
+        eval_every: 100
+        eval_seed: 42
+        grad_clip: 1
+        group_name: DTi
+        lr: 0.0001
+        project_name: tmaze_new
+        resume_from: null
+        run_name: run_0
+        target_return: 0
