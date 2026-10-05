@@ -2,10 +2,10 @@
 
 # --- SLURM Settings ---
 #SBATCH -N 1                            # Nodes
-#SBATCH -c 5                            # Cores
+#SBATCH -c 1                            # Cores
 #SBATCH --output=logs/%x_%j.out         # Output log (make sure 'logs' dir exists)
 #SBATCH --error=logs/%x_%j.err          # Error log
-#SBATCH --partition=res-gpu-small       # Partition name
+#SBATCH --partition=ug-gpu-small       # Partition name
 #SBATCH --qos=short                     # QOS
 #SBATCH --gres=gpu:1g.10gb:1            # GPUs
 #SBATCH --mem=8G                        # RAM

@@ -1,7 +1,7 @@
 import argparse, importlib, os
-from train import train
 
 def run_experiment(experiment: str, index: int):
+    from train import train
     train(importlib.import_module(experiment).getRun(index))
 
 if __name__ == "__main__":

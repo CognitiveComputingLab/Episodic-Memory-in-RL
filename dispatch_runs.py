@@ -6,7 +6,7 @@ if __name__ == "__main__":
     p.add_argument("experiment")
     p.add_argument("n", type=int)
     p.add_argument("--max-concurrent", type=int, default=4)
-    p.add_argument("--time", default="12:00:00")
+    p.add_argument("--time", default="00:30:00")
     p.add_argument("--no-slurm", action="store_true")
     args = p.parse_args()
 
