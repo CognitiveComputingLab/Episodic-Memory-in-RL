@@ -101,6 +101,7 @@ class DecisionTransformer(BaseModel, Cacheful):
             loss = F.mse_loss(pred_y, y, reduction='none').mean(dim=-1)
         return (loss * mask).sum() / mask.sum()
 
+    @torch.compiler.disable
     @torch.no_grad()
     def sample(self, env: Env, target: int) -> float:
         return sliding_window_sample(

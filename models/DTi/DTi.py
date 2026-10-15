@@ -50,7 +50,7 @@ class DecisionTitan(DecisionTransformer):
         self.num_persistent = num_persistent
         self.mini_batch_size = mini_batch_size
         
-
+    @torch.compiler.disable
     @torch.no_grad()    # This must be no_grad and not inference mode otherwise grad calc for memory breaks.
     def sample(self, env: Env, target: int) -> float:
         return chunked_cacheful_sample(

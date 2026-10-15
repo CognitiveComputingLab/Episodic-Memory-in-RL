@@ -15,6 +15,7 @@ class BaseModel(nn.Module):
         self.context_len = context_len
 
     @abstractmethod
+    @torch.compiler.disable
     @torch.no_grad()
     def sample(self, env: Env, target: int) -> float:
         pass

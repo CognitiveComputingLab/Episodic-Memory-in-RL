@@ -113,6 +113,7 @@ class RATE(DecisionTransformer, Cacheful, Stateful[Optional[Tensor]]):
         if self.mem_t is not None:
             self.mem_t = self.mem_t.detach()
 
+    @torch.compiler.disable
     @torch.no_grad()    # This must be no_grad and not inference mode otherwise grad calc for memory breaks.
     def sample(self, env: Env, target: int) -> float:
         return chunked_cacheful_sample(

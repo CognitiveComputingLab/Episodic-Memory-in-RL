@@ -15,7 +15,8 @@ def getRun(id: int) -> RunConfig:
             titan_layers=[1],
             num_persistent=1,
             mini_batch_size=15,  # raw token count
-            block_layout="mal_blocks"
+            block_layout="mal_blocks",
+            torch_compile=True
         )
     
     env_config = XMazeConfig(

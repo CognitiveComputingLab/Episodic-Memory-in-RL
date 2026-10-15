@@ -38,6 +38,7 @@ class TitansMemory(TTT_Module, Stateful[tuple[Optional[TensorDict],Optional[Tens
         v_pred = functional_call(self.memoryModule, dict(params), (k,))
         return (lr*((v - v_pred) ** 2).mean(-1, keepdim=True)).mean()
 
+    @torch.compiler.disable
     def write(self, x: Tensor):
         assert self.memory_state is not None
         kv = self.kv_proj(x)    # Get kv from x
@@ -47,6 +48,7 @@ class TitansMemory(TTT_Module, Stateful[tuple[Optional[TensorDict],Optional[Tens
         s_retain = self.s_retain_proj(x).mean(dim=1).squeeze(-1)        # TO-DO: update these to calculate value based on chunk
 
         grads = vmap(grad(self._write))(self.memory_state, k, v, lr)            # Predict v from k
+        
         self.momentum_state = s_retain * self.momentum_state - grads            # Update momentum
         self.memory_state = m_retain * self.memory_state + self.momentum_state  # Update memory
 

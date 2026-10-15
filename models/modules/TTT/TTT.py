@@ -33,6 +33,7 @@ class TTT_Memory(TTT_Module, Stateful[Optional[TensorDict]]):
         v_pred = functional_call(self.memoryModule, dict(params), (k,))
         return (lr*((v - v_pred) ** 2).mean(-1, keepdim=True)).mean()   # 2nd mean is where assoc scan?
 
+    @torch.compiler.disable
     def write(self, x: Tensor):
         assert self.state is not None
         kv = self.kv_proj(x)    # Get kv from x

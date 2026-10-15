@@ -81,8 +81,6 @@ class Attention(nn.Module, Cacheful):
         out = rearrange(out, "b h t e -> b t (h e)")
         return self.out_proj(out)
 
-    # reset_cache / wipe_cache unchanged
-
     def reset_cache(self, batch: int) -> None:
         device = self.qkv_proj.weight.device
         self.k_cache = torch.zeros(batch, self.heads, self.w_size, self.h_dim, device=device)

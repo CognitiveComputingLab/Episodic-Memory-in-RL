@@ -8,6 +8,7 @@ from models import BaseModel
 class ModelConfig(ABC):
 
     context_len: int
+    torch_compile: bool
 
     @abstractmethod
     def get_model(self, env_config: EnvConfig) -> BaseModel:
