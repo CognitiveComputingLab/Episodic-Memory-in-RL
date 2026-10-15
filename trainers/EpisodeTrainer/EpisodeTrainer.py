@@ -19,7 +19,7 @@ class EpisodeTrainer(BaseTrainer[EpisodeTrainConfig]):
         s, a, r, t, m = batch
 
         for i in range(0, s.shape[1], self.model_config.context_len):
-            if self.detach_every is not None and i % self.detach_every == 0:
+            if self.detach_every is not None and i % (self.detach_every*self.model_config.context_len) == 0:
                 self.model.detach_states()
             sc, ac, rc, tc, mt = tuple(x[:, i:i + self.model_config.context_len] for x in batch)
             a_preds.append(self.model(rc, sc, ac, tc))

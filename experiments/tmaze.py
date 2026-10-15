@@ -13,7 +13,7 @@ def getRun(id: int) -> RunConfig:
             embed_dim=32,
             time_embed='global_sinusoidal',
             titan_layers=[1],
-            num_persistent=3,
+            num_persistent=1,
             mini_batch_size=15,  # raw token count
             block_layout="mal_blocks"
         )

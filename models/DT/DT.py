@@ -9,6 +9,9 @@ from models import BaseModel, Cacheful
 from models.sampling import sliding_window_sample
 
 class DecisionTransformer(BaseModel, Cacheful):
+    """
+    Decision Transformer - Lili Chen et al. (https://arxiv.org/abs/2106.01345) 
+    """
 
     def __init__(
             self,

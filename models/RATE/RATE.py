@@ -11,6 +11,9 @@ from models.sampling import chunked_cacheful_sample
 from models.modules.Transformer import CrossAttention
 
 class RATE(DecisionTransformer, Cacheful, Stateful[Optional[Tensor]]):
+    """
+    Recurrent Action Transformer with Memory - Egor Cherepanov et al. (https://arxiv.org/abs/2306.09459)
+    """
 
     def __init__(
             self,

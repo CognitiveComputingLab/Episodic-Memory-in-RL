@@ -27,7 +27,6 @@ class CrossAttention(nn.Module):
 
         q = rearrange(self.q_proj(x_q), "b t (h e) -> b h t e", h=self.heads)
         k, v = rearrange(self.kv_proj(x_kv), "b t (p h e) -> p b h t e", h=self.heads, p=2)
-
         
         out = F.scaled_dot_product_attention(q, k, v)   # dense, no mask needed
         out = rearrange(out, "b h t e -> b t (h e)")

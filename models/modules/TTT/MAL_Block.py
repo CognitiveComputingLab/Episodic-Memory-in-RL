@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 from models import Cacheful
 from models.modules.TTT import MemoryFactory, titans_mlp
-from models.modules.Transformer import Attention
+from models.modules.Transformer import Attention, grouped_causal
 
 class MAL_Block(nn.Module, Cacheful):
     """
@@ -30,7 +30,7 @@ class MAL_Block(nn.Module, Cacheful):
             ) -> None:
         super().__init__()
 
-        self.attention = Attention(context_len + num_persistent, e_dim, heads)
+        self.attention = Attention(context_len + num_persistent, e_dim, heads, mask_fn=grouped_causal(persistent=num_persistent))
         self.mem = mem_module(e_dim)
 
         self.norm1 = nn.RMSNorm(e_dim)
@@ -45,13 +45,12 @@ class MAL_Block(nn.Module, Cacheful):
         self.context_len = context_len
         self.mini_batch_len = mini_batch_len
 
-        self.token_counter = self.context_len
+        self.token_counter = 0
         self.cache: Optional[Tensor] = None
         
     def forward(self, x: Tensor):
         b, t, _ = x.shape
-
-        if self.token_counter == 0:
+        if self.token_counter == 0:     # bug - does not work at training
             x = torch.cat([self.persistent_tokens.expand([b,-1,-1]), x], dim=1)     # Maybe do this after mem read
 
         x = x + self.mem(self.norm1(x))         # Read mem. Could try cross attention here or concatination. Maybe don't pass in persistent
@@ -64,13 +63,15 @@ class MAL_Block(nn.Module, Cacheful):
             assert self.cache is not None
             self.cache[:,self.token_counter:self.token_counter+t,:] = x     # grow cache
             to_store = self.cache
-            self.token_counter += t
         else:
             to_store = x
 
+        self.token_counter += t
         if self.token_counter == self.context_len:           # Only need to write at the end of a chunk as attention handles intra-chunk info
             for i in range(0, self.token_counter, self.mini_batch_len):
                 self.mem.write(to_store[:, i:i+self.mini_batch_len, ...])
+        if not self.use_cache:
+            self.token_counter = 0
         
         return x
 
@@ -80,10 +81,8 @@ class MAL_Block(nn.Module, Cacheful):
         self.cache = torch.zeros([batch, self.context_len, self.e_dim], device=device)
 
     def wipe_cache(self) -> None:
-        self.token_counter = self.context_len
+        self.token_counter = 0
         self.cache = None
 
     def enable_cache(self, use_cache: bool) -> None:
         super().enable_cache(use_cache)
-        if not use_cache:
-            self.token_counter = self.context_len

@@ -76,16 +76,16 @@ class ELMUR_Block(nn.Module, Cacheful, Stateful[Tuple[Optional[Tensor], Tensor]]
         # Write mems at the end of a chunk
         if (self.token_counter == self.w_size):
             batch_range = torch.arange(to_store.shape[0], device=x.device)
-            old_mem = self.mem_t[batch_range,self.lru].unsqueeze(1)
+            old_mem = self.mem_t[batch_range,self.lru].unsqueeze(1)             # Select the memory token to be replaces
 
-            new_mem: Tensor = self.mem_norm1(self.tok_to_mem(old_mem, to_store) + old_mem)
-            new_mem = self.mem_norm2(self.mem_fnn(new_mem) + new_mem)
+            new_mem: Tensor = self.mem_norm1(self.tok_to_mem(old_mem, to_store) + old_mem)  # Condition new memory on context
+            new_mem = self.mem_norm2(self.mem_fnn(new_mem) + new_mem)                       # FFN
 
-            new_mem = (self.lr * new_mem + (1 - self.lr) * old_mem)                 # [B, 1, e_dim]
+            new_mem = (self.lr * new_mem + (1 - self.lr) * old_mem)                         # Linear interp with old mem
             idx = repeat(self.lru, 'b -> b 1 e', e=self.e_dim)
-            self.mem_t = self.mem_t.scatter(1, idx, new_mem)
+            self.mem_t = self.mem_t.scatter(1, idx, new_mem)                                # Replace old mem with new
 
-            self.lru = (self.lru + 1) % self.mem_tokens
+            self.lru = (self.lru + 1) % self.mem_tokens                                     # Update LRU
 
         if not self.use_cache:
             self.token_counter = 0

@@ -8,7 +8,7 @@ from configs import EnvConfig
 from datahandling.sources import CustomSource
 from datahandling.sources.DataSource import DataSource
 
-from xmaze_jetcobblestone import XMazeEnv, load_dataset_from_disk
+from xmaze_jetcobblestone import XMazeEnv
 
 @dataclass
 class XMazeConfig(EnvConfig):
@@ -49,16 +49,6 @@ class XMazeConfig(EnvConfig):
         )
     
     def get_datasource(self) -> DataSource:
-        print("THIS ONE:", XMazeEnv.getDatasetName(
-            min_instructions=self.min_instructions,
-            max_instructions=self.max_instructions,
-            possible_instructions=self.possible_instructions,
-            min_corridor_len=self.min_corridor_len,
-            max_corridor_len=self.max_corridor_len,
-            episodes=self.episodes,
-            clip=self.clip,
-            encoding=self.encoding
-        ))
         path = "./data/XMaze/" + XMazeEnv.getDatasetName(
             min_instructions=self.min_instructions,
             max_instructions=self.max_instructions,

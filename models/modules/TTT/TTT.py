@@ -31,7 +31,7 @@ class TTT_Memory(TTT_Module, Stateful[Optional[TensorDict]]):
 
     def _write(self, params, k: Tensor, v: Tensor, lr: Tensor):
         v_pred = functional_call(self.memoryModule, dict(params), (k,))
-        return (lr*((v - v_pred) ** 2).mean(-1, keepdim=True)).mean()
+        return (lr*((v - v_pred) ** 2).mean(-1, keepdim=True)).mean()   # 2nd mean is where assoc scan?
 
     def write(self, x: Tensor):
         assert self.state is not None

@@ -22,7 +22,7 @@ class TitansMemory(TTT_Module, Stateful[tuple[Optional[TensorDict],Optional[Tens
         self.kv_proj = nn.Linear(e_dim, 2 * e_dim)
         self.q_proj = nn.Linear(e_dim, e_dim)
         self.lr_proj = nn.Sequential(nn.Linear(e_dim, 1), nn.Sigmoid())
-        self.m_retain_proj = nn.Sequential(nn.Linear(e_dim, 1), nn.Sigmoid())   # memoy retention gate
+        self.m_retain_proj = nn.Sequential(nn.Linear(e_dim, 1), nn.Sigmoid())   # memory retention gate
         self.s_retain_proj = nn.Sequential(nn.Linear(e_dim, 1), nn.Sigmoid())   # momentum retention gate
         
 

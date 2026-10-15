@@ -8,6 +8,9 @@ from models.DT import DecisionTransformer
 from models.sampling import chunked_cacheful_sample
 
 class ELMUR(DecisionTransformer):
+    """
+    External Layer Memory with Update/Rewrite - Egor Cherepanov et al. (https://arxiv.org/abs/2510.07151)
+    """
 
     def __init__(
             self, 

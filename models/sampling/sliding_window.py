@@ -61,5 +61,7 @@ def sliding_window_sample(
         if terminated or truncated:
             break
 
+    model.wipe_caches()
+    model.enable_caches(False)
     model.train()
     return ep_return

@@ -7,6 +7,11 @@ from models.sampling import chunked_cacheful_sample
 
 
 class DecisionTitan(DecisionTransformer):
+    """
+    Decision Titan - Jude Waide and Robert Lieck (https://arxiv.org/abs/2610.01513)
+    Builds on Titans - Ali Behrouz et al. (https://arxiv.org/abs/2501.00663)
+    Builds on TTT - Yu Sun et al. (https://arxiv.org/abs/2407.04620)
+    """
 
     def __init__(
             self, 
