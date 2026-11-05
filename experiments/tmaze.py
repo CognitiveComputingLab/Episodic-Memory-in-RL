@@ -3,8 +3,9 @@ from datahandling.datasets.configs import EpisodeDatasetConfig
 from environments.configs import XMazeConfig
 from models.DTi.Config import DTi_Config
 from trainers.EpisodeTrainer import EpisodeTrainConfig
+from train import train
 
-def getRun(id: int) -> RunConfig:
+def run(id: int):
 
     model_config = DTi_Config(
             context_len=5,
@@ -16,7 +17,7 @@ def getRun(id: int) -> RunConfig:
             num_persistent=1,
             mini_batch_size=15,  # raw token count
             block_layout="mal_blocks",
-            torch_compile=True
+            torch_compile=False
         )
     
     env_config = XMazeConfig(
@@ -58,4 +59,5 @@ def getRun(id: int) -> RunConfig:
         workers=4
     )
 
-    return RunConfig(model_config, env_config, dataset_config, train_config)
+    config = RunConfig(model_config, env_config, dataset_config, train_config)
+    train(config)

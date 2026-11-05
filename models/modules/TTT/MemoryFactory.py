@@ -2,12 +2,12 @@
 from typing import Callable
 import torch.nn as nn
 
-from models.modules.TTT import TTT_Module
-from .TTT import TTT_Memory
+from models.modules.TTT import MemoryModule
+from .TTT_Memory import TTT_Memory
 from .TitansMemory import TitansMemory
 
 
-MemoryFactory = Callable[[int], TTT_Module]
+MemoryFactory = Callable[[int], MemoryModule]
 
 def ttt_mlp(ff_mult: int) -> MemoryFactory:
     def get_module(e_dim: int):

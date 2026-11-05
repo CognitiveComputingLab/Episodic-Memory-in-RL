@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from models import Cacheful
-from models.modules.TTT import MemoryFactory, titans_mlp
+from models.modules.TTT import MemoryFactory, titans_mlp, MemoryModule
 from models.modules.Transformer import Attention, grouped_causal
 
 class MAL_Block(nn.Module, Cacheful):
@@ -31,7 +31,7 @@ class MAL_Block(nn.Module, Cacheful):
         super().__init__()
 
         self.attention = Attention(context_len + num_persistent, e_dim, heads, mask_fn=grouped_causal(persistent=num_persistent))
-        self.mem = mem_module(e_dim)
+        self.mem: MemoryModule = mem_module(e_dim)
 
         self.norm1 = nn.RMSNorm(e_dim)
         self.norm2 = nn.RMSNorm(e_dim)

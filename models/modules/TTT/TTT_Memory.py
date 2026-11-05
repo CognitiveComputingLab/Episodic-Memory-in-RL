@@ -9,41 +9,48 @@ from torch.func import functional_call, grad
 from typing import Optional, cast
 
 from models import Stateful
-from models.modules.TTT import TTT_Module
+from models.modules.TTT import MemoryModule
 
-class TTT_Memory(TTT_Module, Stateful[Optional[TensorDict]]):
+TTT_MemoryState = Optional[TensorDict]
 
-    def __init__(self, e_dim: int, memoryModule: nn.Module, *args, **kwargs) -> None:
+class TTT_Memory(MemoryModule, Stateful[TTT_MemoryState]):
+
+    def __init__(self, dim_in: int, dim_mem: int, lr: float, memoryModule: nn.Module, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.memoryModule = memoryModule    # 2-layered MLP by default
         self.state: Optional[TensorDict] = None
-        self.kv_proj = nn.Linear(e_dim, 2 * e_dim)
-        self.q_proj = nn.Linear(e_dim, e_dim)
-        self.lr_proj = nn.Sequential(nn.Linear(e_dim, 1), nn.Sigmoid())
+        self.kv_proj = nn.Linear(dim_in, 2 * dim_mem, bias=False)
+        self.q_proj = nn.Linear(dim_in, dim_mem)
+        self.lr_proj: nn.Module = nn.Sequential(nn.Linear(dim_in, 1), nn.Sigmoid())
+        self.lr_global = lr
+
 
     def _read(self, params, q: Tensor):
         return functional_call(self.memoryModule, dict(params), (q,))
 
+    def q_read(self, q: Tensor):
+            return vmap(self._read)(self.state, q)
+
     def forward(self, x: Tensor):   # Read
         assert self.state is not None
         q = self.q_proj(x)
-        return vmap(self._read)(self.state, q)
+        return self.q_read(q)
 
     def _write(self, params, k: Tensor, v: Tensor, lr: Tensor):
         v_pred = functional_call(self.memoryModule, dict(params), (k,))
         return (lr*((v - v_pred) ** 2).mean(-1, keepdim=True)).mean()   # 2nd mean is where assoc scan?
 
     @torch.compiler.disable
+    def write_kv(self, k: Tensor, v: Tensor, lr: Tensor):
+        grads = vmap(grad(self._write))(self.state, k, v, lr)   # Predict v from k
+        self.state = (self.state - self.lr_global * grads)      # Update memory
+
     def write(self, x: Tensor):
         assert self.state is not None
-        kv = self.kv_proj(x)    # Get kv from x
+        kv: Tensor = self.kv_proj(x)    # Get kv from x
         k, v = rearrange(kv, "b ... (p e) -> p b ... e", p=2)
         lr = self.lr_proj(x)
-
-        grads = vmap(grad(self._write))(self.state, k, v, lr)   # Predict v from k
-        
-        self.state = (self.state - grads)   # Update memory
-
+        self.write_kv(k,v,lr)
 
     def _fresh_state(self, n: int) -> TensorDict:
         params = cast(TensorDict, TensorDict.from_module(self.memoryModule))    # Create a fresh copy of the memory module
@@ -63,10 +70,10 @@ class TTT_Memory(TTT_Module, Stateful[Optional[TensorDict]]):
             batch_size=self.state.batch_size,
         )
 
-    def get_state(self) -> Optional[TensorDict]:
+    def get_state(self) -> TTT_MemoryState:
         return self.state
 
-    def set_state(self, state: Optional[TensorDict]):
+    def set_state(self, state: TTT_MemoryState):
         self.state = state
 
     def detach_state(self) -> None:
