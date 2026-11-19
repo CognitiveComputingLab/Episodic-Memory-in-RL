@@ -14,6 +14,10 @@ only in that number, so a checkpoint ('ttt_100_0') never collides with a seed ('
 For the same seed, every model_type gets the same W_0 init, the same kv projection and the
 same test sequences, so different models can be compared directly.
 
+FwPKM runs additionally store WHERE keys were written: write_count / write_weight, shape
+[sequences, slots] = how often / with how much softmax weight each value row received a write
+during the evaluation rollout (mem_plot.py graphs 'writes' and 'codebooks').
+
 Examples
 --------
     python mem_eval.py --name ttt --model-type TTT --seed 0
@@ -46,18 +50,21 @@ from models.modules.TTT import FwPKM_Memory, MemoryModule, TitansMemory, TTT_Mem
 @dataclass
 class Cfg:
     # identity
-    name: str = "TTT"              # must not end in _<number>
-    out_dir: str = "results/TTT"
+    name: str = "FwPKM"              # must not end in _<number>
+    out_dir: str = "results/FwPKM"
     seed: int = 0                  # becomes the trailing number of every file name
 
     # model
-    model_type: str = "TTT"        # 'TTT' | 'Titans' | 'FwPKM'
+    model_type: str = "FwPKM"        # 'TTT' | 'Titans' | 'FwPKM'
     mem_lr: float = 1.0            # Titans: momentum multiplies the step by 1/(1-s_retain) -> use ~0.1
     s_retain: float = 0.5          # Titans: momentum retention
     m_retain: float = 1            # Titans: memory retention, applied per inner step
     dim_in: int = 32
     dim_mem: int = 64
     e_factor: int = 4
+    pkm_slots: int = 256           # FwPKM: N value rows; must equal n ** pkm_books for an integer n
+    pkm_top_k: int = 5             # FwPKM: sub-keys kept per codebook, and rows read/written per token
+    pkm_books: int = 2             # FwPKM: number of key codebooks (dim_mem must be divisible by it)
 
     # data
     kv_proj: str = "linear_nb"     # 'linear_nb' = frozen linear map, no bias
@@ -90,11 +97,28 @@ class DummyGate(nn.Module):
 
 
 @dataclass
+class WriteInfo:
+    """Where one write step landed. Only models with addressable slots (FwPKM) report this."""
+    rows: Tensor          # [b, t, k]  value-row index each token wrote to
+    weights: Tensor       # [b, t, k]  softmax weight of that write
+
+
+@dataclass
 class Exp:
     """Everything that is not plain data: the model and the functions bound to it."""
     model: MemoryModule
-    write: Callable[[Tensor, Tensor, Tensor], None]            # (x_chunk, k_chunk, v_chunk)
-    sample_kv: Callable[[Tensor], tuple[Tensor, Tensor]]       # x -> (k, v)
+    write: Callable[[Tensor, Tensor, Tensor], Optional[WriteInfo]]   # (x_chunk, k_chunk, v_chunk)
+    sample_kv: Callable[[Tensor], tuple[Tensor, Tensor]]             # x -> (k, v)
+    n_slots: Optional[int] = None                                    # set if write() returns WriteInfo
+
+
+def w0_params(model: nn.Module) -> dict[str, nn.Parameter]:
+    """The parameters that make up W_0 (the memory's initial fast weights), per model type."""
+    if hasattr(model, "memoryModule"):                          # TTT / Titans: the memory MLP
+        return dict(model.memoryModule.named_parameters())
+    if hasattr(model, "keys") and hasattr(model, "values"):     # FwPKM: key codebooks + value table
+        return {"keys": model.keys, "values": model.values}
+    raise ValueError(f"don't know which parameters are W_0 for {type(model).__name__}")
 
 
 def build_experiment(cfg: Cfg) -> Exp:
@@ -106,29 +130,35 @@ def build_experiment(cfg: Cfg) -> Exp:
         nn.Linear(cfg.dim_mem * cfg.e_factor, cfg.dim_mem),
     )
     gate = DummyGate(1)
+    n_slots = None
 
     if cfg.model_type == "TTT":
         model = TTT_Memory(cfg.dim_in, cfg.dim_mem, cfg.mem_lr, mem_model)
 
         def write(x: Tensor, k: Tensor, v: Tensor):
-            model.write_kv(k, v, gate(x))
+            model.write(x, k, v, gate(x))
 
     elif cfg.model_type == "Titans":
         model = TitansMemory(cfg.dim_in, cfg.dim_mem, cfg.mem_lr, mem_model)
+        model.s_retain_proj = gate
+        model.m_retain_proj = gate
 
         def write(x: Tensor, k: Tensor, v: Tensor):
-            model.write_kv(k, v, gate(x), cfg.s_retain, cfg.m_retain)
+            model.write(x, k, v, gate(x))
 
-    elif cfg.model_type == 'FwPKM':
-        model = FwPKM_Memory(cfg.dim_in, cfg.dim_mem, cfg.mem_lr, 256, 5, 2)
-        
+    elif cfg.model_type == "FwPKM":
+        model = FwPKM_Memory(cfg.dim_in, cfg.dim_mem, cfg.mem_lr, cfg.pkm_slots, cfg.pkm_top_k, cfg.pkm_books)
+        n_slots = cfg.pkm_slots
+
         def write(x: Tensor, k: Tensor, v: Tensor):
-            model.write_kv(k, v, gate(x))
+            rows, w = model.write(x, k, v, gate(x))
+            return WriteInfo(rows=rows, weights=w.detach())
+
     else:
         raise ValueError(f"Unrecognised model type: {cfg.model_type}")
 
     model = model.to(cfg.device)
-    return Exp(model=model, write=write, sample_kv=make_kv_fn(cfg))
+    return Exp(model=model, write=write, sample_kv=make_kv_fn(cfg), n_slots=n_slots)
 
 
 def make_kv_fn(cfg: Cfg):
@@ -181,22 +211,34 @@ def rollout(exp: Exp, cfg: Cfg, x, k, v, held=None, differentiable=False):
     Returns
         L [n+1, b, n] : L[s, i, c] = loss of sequence i on chunk c after s chunks were written
         H [n+1, b]    : loss of sequence i on a held-out sequence (never written) after s chunks
+        W             : None, or for models with addressable slots (FwPKM) and when not training
+                        {'write_count' [b, N], 'write_weight' [b, N]}: summed over every token,
+                        top-k slot and inner step of the whole rollout
     """
     mb = cfg.minibatch
     exp.model.reset_state(cfg.b)               # state = W_0 copy per sequence
+
+    track = exp.n_slots is not None and not differentiable
+    w_count = torch.zeros(cfg.b, exp.n_slots, device=x.device) if track else None
+    w_weight = torch.zeros_like(w_count) if track else None
 
     L = [recall(exp, cfg, k, v)]
     H = [recall(exp, cfg, *held).mean(-1)] if held is not None else []
     for i in range(0, cfg.t, mb):
         sl = slice(i, i + mb)
         for _ in range(cfg.inner_steps):
-            exp.write(x[:, sl], k[:, sl], v[:, sl])
+            info = exp.write(x[:, sl], k[:, sl], v[:, sl])
+            if track and info is not None:
+                flat = info.rows.flatten(1)                                          # [b, t*k]
+                w_count.scatter_add_(1, flat, torch.ones_like(flat, dtype=w_count.dtype))
+                w_weight.scatter_add_(1, flat, info.weights.flatten(1))
         if not differentiable:
             exp.model.detach_state()           # training keeps the graph for dLoss/dW_0
         L.append(recall(exp, cfg, k, v))
         if held is not None:
             H.append(recall(exp, cfg, *held).mean(-1))
-    return torch.stack(L), (torch.stack(H) if held is not None else None)
+    writes = {"write_count": w_count, "write_weight": w_weight} if track else None
+    return torch.stack(L), (torch.stack(H) if held is not None else None), writes
 
 
 @torch.no_grad()
@@ -210,8 +252,12 @@ def evaluate(exp: Exp, cfg: Cfg) -> dict:
     gen = make_gen(cfg, 10_000 + cfg.seed)
     x, k, v = sample(exp, cfg, gen)
     _, kh, vh = sample(exp, cfg, gen)          # held-out sequence: same distribution, never written
-    L, H = rollout(exp, cfg, x, k, v, held=(kh, vh))
-    return {"L": L.cpu().numpy(), "H": H.cpu().numpy()}
+    L, H, W = rollout(exp, cfg, x, k, v, held=(kh, vh))
+    out = {"L": L.cpu().numpy(), "H": H.cpu().numpy()}
+    if W is not None:
+        out["write_count"] = W["write_count"].cpu().numpy().astype(np.int64)
+        out["write_weight"] = W["write_weight"].cpu().numpy().astype(np.float32)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -231,7 +277,7 @@ def train_w0(exp: Exp, cfg: Cfg, on_checkpoint: Optional[Callable[[int, list], N
     Each outer iteration draws NEW x; the k/v projection is fixed. Gradients flow
     loss -> reads -> state_n -> ... -> state_0 = W_0, so the inner loop is not detached.
     """
-    params = list(exp.model.parameters())
+    params = list(w0_params(exp.model).values())
     for p in params:
         p.requires_grad_(True)
     opt = torch.optim.Adam(params, lr=cfg.outer_lr)
@@ -240,7 +286,7 @@ def train_w0(exp: Exp, cfg: Cfg, on_checkpoint: Optional[Callable[[int, list], N
     for it in range(cfg.outer_steps):
         x, k, v = sample(exp, cfg, gen)
         with torch.enable_grad():
-            L, _ = rollout(exp, cfg, x, k, v, differentiable=True)
+            L, _, _ = rollout(exp, cfg, x, k, v, differentiable=True)
             loss = outer_objective(L, cfg.outer_loss)
             opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -272,6 +318,11 @@ def save_result(exp: Exp, cfg: Cfg, step: int, history: list[float], final: bool
     out = Path(cfg.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
+    extra = {}
+    if "write_count" in res:                         # FwPKM only
+        extra = dict(write_count=res["write_count"],     # [b, N] writes each value row received
+                     write_weight=res["write_weight"],   # [b, N] same, weighted by softmax weight
+                     key_books=cfg.pkm_books)            # lets mem_plot split rows per codebook
     np.savez(
         out / f"{stem}.npz",
         L=res["L"],                                  # [n+1, b, n] per-sequence loss matrix
@@ -280,18 +331,23 @@ def save_result(exp: Exp, cfg: Cfg, step: int, history: list[float], final: bool
         t=cfg.t,
         step=step,                                   # outer updates applied when this was evaluated
         history=np.asarray(history, dtype=np.float32),   # outer loss per iteration so far
+        **extra,
     )
     with open(out / f"{stem}.json", "w") as f:
         json.dump({"cfg": asdict(cfg), "step": step, "final": final}, f, indent=2)
     if cfg.save_w0:
-        torch.save(exp.model.memoryModule.state_dict(), out / f"{stem}.pt")
+        torch.save({k: p.detach().cpu() for k, p in w0_params(exp.model).items()}, out / f"{stem}.pt")
 
     if not np.isfinite(res["L"]).all():
         print(f"  WARNING: non-finite losses in {stem} -- the memory diverged "
               f"(Titans: lower mem_lr or s_retain)", flush=True)
     seen = res["L"][-1].mean()
+    used = ""
+    if "write_count" in res:
+        n_used = int((res["write_count"].sum(0) > 0).sum())
+        used = f" | rows written {n_used}/{res['write_count'].shape[1]}"
     print(f"[{stem}] step {step}: start {res['L'][0].mean():.4g} | "
-          f"final seen {seen:.4g} | held-out {res['H'][-1].mean():.4g}", flush=True)
+          f"final seen {seen:.4g} | held-out {res['H'][-1].mean():.4g}{used}", flush=True)
     return out / f"{stem}.npz"
 
 

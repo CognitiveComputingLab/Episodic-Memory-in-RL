@@ -66,15 +66,16 @@ class FwPKM_Memory(MemoryModule, Stateful[FwPKM_MemoryState]):
         v_hat = torch.einsum('btk,btkd->btd', w, self.values_state[batch, rows])       # values[batch, rows]: [b, t, k, dv]
         return v_hat, rows, w
 
-    def q_read(self, q: Tensor):
+    def forward(self, q: Tensor):   # Read
         return self._read(q)[0]
 
-    def forward(self, x: Tensor):   # Read
-        q = self.q_proj(x)
-        return self.q_read(q)[0]
 
+    def write(self, x: Tensor, k: Tensor, v: Tensor, lr: Tensor) -> tuple[Tensor, Tensor]:
+        """Write (k, v) into the value table. `lr` must already include lr_global (see `write`).
 
-    def write_kv(self, k: Tensor, v: Tensor, lr: Tensor):
+        Returns (rows, w), both [b, t, top_k]: which value rows each token wrote to and with
+        what softmax weight. Callers that only want the side effect can ignore them.
+        """
         assert self.keys_state is not None and self.values_state is not None
 
         b = k.shape[0]
@@ -90,17 +91,12 @@ class FwPKM_Memory(MemoryModule, Stateful[FwPKM_MemoryState]):
             n_read = counts.gather(1, flat).view_as(rows)          # [b, t, k]
 
         # per-(token, slot) update, normalized by how many tokens wrote to that row
-        delta = (lr[..., None] * w[..., None] * err[:, :, None, :]) / n_read[..., None]   # [b, t, k, dv]
+        delta = (self.lr_global * lr[..., None] * w[..., None] * err[:, :, None, :]) / n_read[..., None]   # [b, t, k, dv]
 
         batch = torch.arange(b, device=k.device)[:, None, None]
         # out-of-place scatter-add: duplicate rows accumulate, no autograd in-place issues
         self.values_state = self.values_state.index_put((batch, rows), delta, accumulate=True)
-
-    def write(self, x: Tensor) -> None:
-        kv = self.kv_proj(x)
-        wk, v = rearrange(kv, 'b t (p e) -> p b t e', p=2)        # write key, value: [b, t, dim_mem]
-        lr = self.lr_proj(x) * self.lr_global                      # [b, t, 1]
-        self.write_kv(wk,v,lr)
+        return rows, w
         
 
     def _fresh_state(self, n: int) -> tuple[Tensor, Tensor]:
@@ -127,6 +123,6 @@ class FwPKM_Memory(MemoryModule, Stateful[FwPKM_MemoryState]):
 
     def detach_state(self) -> None:
         if self.keys_state is not None:
-            self.keys_state.detach()
+            self.keys_state = self.keys_state.detach()       # detach() is not in-place
         if self.values_state is not None:
-            self.values_state.detach()
+            self.values_state = self.values_state.detach()

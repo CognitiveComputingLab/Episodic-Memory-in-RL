@@ -15,42 +15,30 @@ TTT_MemoryState = Optional[TensorDict]
 
 class TTT_Memory(MemoryModule, Stateful[TTT_MemoryState]):
 
-    def __init__(self, dim_in: int, dim_mem: int, lr: float, memoryModule: nn.Module, *args, **kwargs) -> None:
+    def __init__(self, lr: float, memoryModule: nn.Module, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.memoryModule = memoryModule    # 2-layered MLP by default
         self.state: Optional[TensorDict] = None
-        self.kv_proj = nn.Linear(dim_in, 2 * dim_mem, bias=False)
-        self.q_proj = nn.Linear(dim_in, dim_mem)
-        self.lr_proj: nn.Module = nn.Sequential(nn.Linear(dim_in, 1), nn.Sigmoid())
         self.lr_global = lr
-
+        
 
     def _read(self, params, q: Tensor):
         return functional_call(self.memoryModule, dict(params), (q,))
 
-    def q_read(self, q: Tensor):
-            return vmap(self._read)(self.state, q)
-
-    def forward(self, x: Tensor):   # Read
+    def forward(self, q: Tensor):   # Read
         assert self.state is not None
-        q = self.q_proj(x)
-        return self.q_read(q)
+        return vmap(self._read)(self.state, q)
+
 
     def _write(self, params, k: Tensor, v: Tensor, lr: Tensor):
         v_pred = functional_call(self.memoryModule, dict(params), (k,))
         return (lr*((v - v_pred) ** 2).mean(-1, keepdim=True)).mean()   # 2nd mean is where assoc scan?
 
     @torch.compiler.disable
-    def write_kv(self, k: Tensor, v: Tensor, lr: Tensor):
+    def write(self, x: Tensor, k: Tensor, v: Tensor, lr: Tensor):
         grads = vmap(grad(self._write))(self.state, k, v, lr)   # Predict v from k
         self.state = (self.state - self.lr_global * grads)      # Update memory
 
-    def write(self, x: Tensor):
-        assert self.state is not None
-        kv: Tensor = self.kv_proj(x)    # Get kv from x
-        k, v = rearrange(kv, "b ... (p e) -> p b ... e", p=2)
-        lr = self.lr_proj(x)
-        self.write_kv(k,v,lr)
 
     def _fresh_state(self, n: int) -> TensorDict:
         params = cast(TensorDict, TensorDict.from_module(self.memoryModule))    # Create a fresh copy of the memory module
@@ -62,7 +50,7 @@ class TTT_Memory(MemoryModule, Stateful[TTT_MemoryState]):
     def reset_state_at(self, indices: list[int]) -> None:
         assert self.state is not None
         fresh = self._fresh_state(len(indices))
-        idx = torch.as_tensor(list(indices), dtype=torch.long, device=self.q_proj.weight.device)
+        idx = torch.as_tensor(list(indices), dtype=torch.long, device=self.state.device)
 
         # Create a new state to avoid autograd issues - claude
         self.state = TensorDict(    

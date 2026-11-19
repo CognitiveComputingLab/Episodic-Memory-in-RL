@@ -2,11 +2,13 @@ from configs import RunConfig
 from datahandling.datasets.configs import EpisodeDatasetConfig
 from environments.configs import XMazeConfig
 from models.DTi.Config import DTi_Config
+from models.TBD.Config import TBD_Config
 from trainers.EpisodeTrainer import EpisodeTrainConfig
 from train import train
 
 def run(id: int):
 
+    
     model_config = DTi_Config(
             context_len=5,
             layers=3,
@@ -20,16 +22,36 @@ def run(id: int):
             torch_compile=False
         )
     
+
+    """
+    model_config = TBD_Config(
+            context_len=5,
+            layers=3,
+            heads=1,
+            embed_dim=32,
+            time_embed='global_sinusoidal',
+            titan_layers=[1],
+            num_persistent=1,
+            mini_batch_size=15,  # raw token count
+            block_layout="tbd_blocks",
+            torch_compile=False,
+            lr_T=1,
+            lr_V=0.5,
+            lr_R=1
+        )
+    """
+
+    
     env_config = XMazeConfig(
         max_action=1,   # always 1
-        max_ep_len=10,
+        max_ep_len=1000,
         reward_scaling=1,
         min_instructions=1,
         max_instructions=2,
         possible_instructions=2,
-        min_corridor_len=6,
-        max_corridor_len=7,
-        episodes=1000,
+        min_corridor_len=50,    # 6
+        max_corridor_len=51,    # 7
+        episodes=64,            # 1000
         clip=None,
         encoding="onehot_repeat",
         instruction_every=1
@@ -46,7 +68,7 @@ def run(id: int):
         target_return=0,
         grad_clip=1,
         device='cuda',
-        do_wandb=False,
+        do_wandb=True,
         project_name='tmaze_new',
         group_name='DTi',
         run_name=f'run_{id}',

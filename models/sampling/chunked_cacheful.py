@@ -12,7 +12,7 @@ def chunked_cacheful_sample(
     is_discrete,
     env: Env, 
     target: int) -> float:
-
+    
     model.eval()
     model.reset_states(1)    # Reset memory
     model.reset_caches(1)    # Reset caches    
@@ -32,12 +32,12 @@ def chunked_cacheful_sample(
 
     ep_return = 0.0
     for step in range(max_len):
-
+        
         end = step + 1
         pred = model(
             rtgs     [:, step:end],
             states   [:, step:end],
-            actions  [:, (step-1 if step > 0 else 0):step],    # Do not pass in a dummy action to avoid this being saved in memory
+            actions  [:, (step if step % model.context_len == 0 else step-1):step],    # Do not pass in a dummy action to avoid this being saved in memory
             timesteps[:, step:end],
         )
         action = pred[0, -1]

@@ -16,17 +16,14 @@ TitansMemoryState = tuple[Optional[TensorDict],Optional[TensorDict]]
 
 class TitansMemory(MemoryModule, Stateful[TitansMemoryState]):
 
-    def __init__(self, dim_in: int, dim_mem: int, lr: float, memoryModule: nn.Module, *args, **kwargs) -> None:
+    def __init__(self, e_dim: int, lr: float, memoryModule: nn.Module, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.memoryModule = memoryModule    # 2-layered MLP by default
         self.memory_state: Optional[TensorDict] = None
         self.momentum_state: Optional[TensorDict] = None
 
-        self.kv_proj = nn.Linear(dim_in, 2 * dim_mem)
-        self.q_proj = nn.Linear(dim_in, dim_mem)
-        self.lr_proj: nn.Module = nn.Sequential(nn.Linear(dim_in, 1), nn.Sigmoid())
-        self.m_retain_proj = nn.Sequential(nn.Linear(dim_in, 1), nn.Sigmoid())   # memory retention gate
-        self.s_retain_proj = nn.Sequential(nn.Linear(dim_in, 1), nn.Sigmoid())   # momentum retention gate
+        self.m_retain_proj: nn.Module = nn.Sequential(nn.Linear(e_dim, 1), nn.Sigmoid())   # memory retention gate
+        self.s_retain_proj: nn.Module = nn.Sequential(nn.Linear(e_dim, 1), nn.Sigmoid())   # momentum retention gate
 
         self.lr_global = lr
 
@@ -34,13 +31,9 @@ class TitansMemory(MemoryModule, Stateful[TitansMemoryState]):
     def _read(self, params, q: Tensor):
         return functional_call(self.memoryModule, dict(params), (q,))
 
-    def q_read(self, q: Tensor):    # Useful for tests
-        return vmap(self._read)(self.memory_state, q) 
-
-    def forward(self, x: Tensor):   # Read
+    def forward(self, q: Tensor):   # Read
         assert self.memory_state is not None
-        q = self.q_proj(x)
-        return self.q_read(q)   # Query the memoy
+        return vmap(self._read)(self.memory_state, q) 
 
 
     def _write(self, params, k: Tensor, v: Tensor, lr: Tensor):
@@ -48,22 +41,14 @@ class TitansMemory(MemoryModule, Stateful[TitansMemoryState]):
         return (lr*((v - v_pred) ** 2).mean(-1, keepdim=True)).mean()
 
     @torch.compiler.disable
-    def write_kv(self, k: Tensor, v: Tensor, lr: Tensor, m_retain: Tensor, s_retain: Tensor):
-        
-        assert self.memory_state is not None and self.momentum_state is not None 
+    def write(self, x: Tensor, k: Tensor, v: Tensor, lr: Tensor):
+        assert self.memory_state is not None and self.momentum_state is not None
+        m_retain = self.m_retain_proj(x).mean(dim=1).squeeze(-1)        # Calculate a global decay by meaning from each token (!)
+        s_retain = self.s_retain_proj(x).mean(dim=1).squeeze(-1)        # TO-DO: update these to calculate value based on chunk
 
         grads = vmap(grad(self._write))(self.memory_state, k ,v, lr)            # Predict v from k
         self.momentum_state = s_retain * self.momentum_state - self.lr_global * grads   # Update momentum
         self.memory_state = m_retain * self.memory_state + self.momentum_state          # Update memory
-
-    def write(self, x: Tensor):
-        kv = self.kv_proj(x)    # Get kv from x
-        k, v = rearrange(kv, "b ... (p e) -> p b ... e", p=2)
-        lr = self.lr_proj(x)
-        m_retain = self.m_retain_proj(x).mean(dim=1).squeeze(-1)        # Calculate a global decay by meaning from each token (!)
-        s_retain = self.s_retain_proj(x).mean(dim=1).squeeze(-1)        # TO-DO: update these to calculate value based on chunk
-        self.write_kv(k, v, lr, m_retain, s_retain)
-
 
 
     def _fresh_state(self, n: int) -> tuple[TensorDict, TensorDict]:
@@ -78,7 +63,7 @@ class TitansMemory(MemoryModule, Stateful[TitansMemoryState]):
     def reset_state_at(self, indices: list[int]) -> None:
         assert self.memory_state is not None and self.momentum_state is not None
         fresh_mem, fresh_momem = self._fresh_state(len(indices))
-        idx = torch.as_tensor(list(indices), dtype=torch.long, device=self.q_proj.weight.device)
+        idx = torch.as_tensor(list(indices), dtype=torch.long, device=self.memory_state.device)
 
         # Create a new state to avoid autograd issues - claude
         self.memory_state = TensorDict(    

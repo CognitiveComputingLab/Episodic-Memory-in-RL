@@ -17,9 +17,7 @@ class DecisionTitan(DecisionTransformer):
             self, 
             context_len: int, 
             embed_dim: int, 
-            titan_layers: list[int],    # On which layers to use TTT memory
             num_persistent: int,        # How many persistent tokens appended to the beginning of a chunk (unique for each layer)
-            mini_batch_size: int,       # How often a write step occurs
             act_dim: int, 
             obs_dim: int, 
             max_action: float, 
@@ -46,9 +44,7 @@ class DecisionTitan(DecisionTransformer):
             action_unembed,
             blocks)
 
-        self.titan_layers = titan_layers
         self.num_persistent = num_persistent
-        self.mini_batch_size = mini_batch_size
         
     @torch.compiler.disable
     @torch.no_grad()    # This must be no_grad and not inference mode otherwise grad calc for memory breaks.

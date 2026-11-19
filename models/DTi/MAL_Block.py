@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+from einops import rearrange
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -47,29 +48,51 @@ class MAL_Block(nn.Module, Cacheful):
 
         self.token_counter = 0
         self.cache: Optional[Tensor] = None
+
+        self.kv_proj = nn.Linear(e_dim, 2 * e_dim)
+        self.q_proj = nn.Linear(e_dim, e_dim)
+        self.lr_proj: nn.Module = nn.Sequential(nn.Linear(e_dim, 1), nn.Sigmoid())
         
+
+    def read(self, x: Tensor):
+        q = self.q_proj(x)
+        return self.mem(q) # * self.lr_proj(q)      Gate to encourage writing of useful tokens 
+
+    def write(self, x: Tensor):
+        kv = self.kv_proj(x)    # Get kv from x
+        k, v = rearrange(kv, "b ... (p e) -> p b ... e", p=2)
+        lr = self.lr_proj(x)
+        self.mem.write(x,k,v,lr)
+    
     def forward(self, x: Tensor):
         b, t, _ = x.shape
-        if self.token_counter == 0:     # bug - does not work at training
-            x = torch.cat([self.persistent_tokens.expand([b,-1,-1]), x], dim=1)     # Maybe do this after mem read
 
-        x = x + self.mem(self.norm1(x))         # Read mem. Could try cross attention here or concatination. Maybe don't pass in persistent
+        x = x + self.read(self.norm1(x))         # Read mem. Could try cross attention here or concatination.
+
+        # Add in persistent tokens
+        if self.token_counter == 0:
+            x = torch.cat([self.persistent_tokens.expand([b,-1,-1]), x], dim=1)
+
         x = x + self.attention(self.norm2(x))   # Self attention
 
+        # Trim out persistent tokens
         if self.token_counter == 0:
-            x = x[:, self.num_persistent:, :]       # Trim out persistent tokens
+            x = x[:, self.num_persistent:, :]
 
         if not self.training and self.use_cache:
             assert self.cache is not None
-            self.cache[:,self.token_counter:self.token_counter+t,:] = x     # grow cache
+            self.cache[:,self.token_counter:self.token_counter+t,:] = x     # Grow write cache
             to_store = self.cache
         else:
             to_store = x
 
+        # Write
         self.token_counter += t
         if self.token_counter == self.context_len:           # Only need to write at the end of a chunk as attention handles intra-chunk info
             for i in range(0, self.token_counter, self.mini_batch_len):
-                self.mem.write(to_store[:, i:i+self.mini_batch_len, ...])
+                self.write(to_store[:, i:i+self.mini_batch_len, ...])
+
+        # Always reset token counter if cache not in use
         if not self.use_cache:
             self.token_counter = 0
         

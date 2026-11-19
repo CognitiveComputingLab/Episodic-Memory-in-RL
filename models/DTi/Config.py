@@ -32,9 +32,7 @@ class DTi_Config(DT_Config):
         return DecisionTitan(
             context_len=self.context_len,
             embed_dim=self.embed_dim,
-            titan_layers=self.titan_layers,
             num_persistent=self.num_persistent,
-            mini_batch_size=self.mini_batch_size,
             act_dim=env_config.act_dim,
             obs_dim=env_config.obs_dim,
             max_action=env_config.max_action,

@@ -19,18 +19,24 @@ Graphs (one row each, in the order given)
     forgetting  loss / held-out loss vs. age of the chunk              (groups overlaid)
     time        written / not-yet-written / held-out loss over time    (groups overlaid)
     training    outer loss during W_0 meta-training                    (groups overlaid)
+    writes      bar chart: share of all writes each memory row received (one panel per group,
+                same y-scale; FwPKM runs only -- other groups show a placeholder)
+    codebooks   bar chart: the same writes split per key codebook, i.e. how often each
+                sub-key of each codebook was part of a written row (FwPKM only)
 
 Examples
 --------
     python mem_plot.py results/ttt_*.npz results/titans_*.npz --graphs heatmap forgetting time
     python mem_plot.py results/ttt_0_0.npz results/ttt_100_0.npz results/ttt_0.npz \\
                        --graphs snapshots forgetting --labels init step-100 final
+    python mem_plot.py results/fwpkm_*.npz --graphs heatmap writes codebooks --writes-order rank
 """
 from __future__ import annotations
 
 import argparse
 import glob
 import json
+import math
 import re
 import sys
 from dataclasses import dataclass
@@ -45,7 +51,8 @@ from matplotlib.colors import LogNorm
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
-PER_GROUP = ("heatmap", "snapshots")              # one panel per group
+PER_GROUP = ("heatmap", "snapshots", "writes", "codebooks")      # one panel per group
+WRITE_GRAPHS = ("writes", "codebooks")                             # need FwPKM write data
 OVERLAY = ("forgetting", "time", "training")      # one panel, groups overlaid
 GRAPHS = PER_GROUP + OVERLAY
 
@@ -65,6 +72,9 @@ class Group:
     H: np.ndarray               # [n+1, N]
     minibatch: int
     histories: list[np.ndarray]
+    write_count: np.ndarray | None = None      # [N_seqs, slots]  FwPKM only
+    write_weight: np.ndarray | None = None     # [N_seqs, slots]
+    key_books: int | None = None
 
     @property
     def Lbar(self) -> np.ndarray:       # [n+1, n]   mean over files and sequences
@@ -138,6 +148,18 @@ def load_groups(paths: list[Path], labels: list[str] | None) -> list[Group]:
                 sys.exit(f"error: group '{key}': {f.name} has a different sequence length / chunk size "
                          f"than {files[0].name}; cannot average them")
         check_configs(key, files)
+
+        write_kw = {}
+        has_writes = ["write_count" in d.files for d in data]
+        if any(has_writes) and not all(has_writes):
+            print(f"warning: group '{key}': only some files contain write data; ignoring it for this group",
+                  file=sys.stderr)
+        elif all(has_writes):
+            if len({d["write_count"].shape[1] for d in data}) != 1 or len({int(d["key_books"]) for d in data}) != 1:
+                sys.exit(f"error: group '{key}': files differ in number of memory slots / codebooks; cannot average them")
+            write_kw = dict(write_count=np.concatenate([d["write_count"] for d in data], axis=0),
+                            write_weight=np.concatenate([d["write_weight"] for d in data], axis=0),
+                            key_books=int(ref["key_books"]))
         groups.append(Group(
             key=key,
             label=labels[i] if labels else key,
@@ -146,6 +168,7 @@ def load_groups(paths: list[Path], labels: list[str] | None) -> list[Group]:
             H=np.concatenate([d["H"] for d in data], axis=1),
             minibatch=int(ref["minibatch"]),
             histories=[d["history"] for d in data if "history" in d.files and d["history"].size],
+            **write_kw,
         ))
     return groups
 
@@ -243,7 +266,7 @@ def draw_forgetting(ax, groups, colors):
         ax.fill_between(ages, lo, hi, color=colors[i], alpha=0.15)
     ax.axvline(-0.5 * groups[0].minibatch, color="k", lw=0.8, ls=":")
     ax.axhline(1.0, color="k", lw=0.8, ls="--")
-    ax.set_yscale("log")
+    #ax.set_yscale("log")
     ax.set_xlabel("age in tokens   (0 = just written, < 0 = not written yet)")
     ax.set_ylabel("MSE / held-out MSE   (1 = no trace)")
     ax.set_title("Forgetting curve (mean; band = 10-90% over write steps)", fontsize=10)
@@ -296,10 +319,101 @@ def draw_training(ax, groups, colors):
               fontsize=8, framealpha=0.8)
 
 
+def write_distribution(g: Group, by: str) -> np.ndarray:
+    """Fraction of all writes that landed on each memory row, [slots]; sums to 1.
+
+    by='count'  : every (token, top-k slot, inner step) selection counts once
+    by='weight' : selections are weighted by their softmax weight, i.e. by how much of the
+                  write actually went there
+    """
+    arr = g.write_count if by == "count" else g.write_weight
+    v = arr.sum(0).astype(np.float64)
+    return v / v.sum()
+
+
+def bar_values(p: np.ndarray, order: str, max_bars: int) -> tuple[np.ndarray, int]:
+    """Optionally sort rows by usage, and merge neighbouring rows so at most max_bars are drawn."""
+    if order == "rank":
+        p = np.sort(p)[::-1]
+    binw = max(1, math.ceil(len(p) / max_bars))
+    if binw > 1:
+        p = np.pad(p, (0, (-len(p)) % binw)).reshape(-1, binw).sum(1)
+    return p, binw
+
+
+def codebook_marginals(p: np.ndarray, books: int) -> np.ndarray:
+    """[books, n]: share of writes whose row used sub-key j of codebook i.
+
+    Row index = idx_0 * n**(books-1) + ... + idx_{books-1} (codebook 0 slowest, as in FwPKM._combine),
+    so reshaping to (n,)*books gives one axis per codebook.
+    """
+    n = round(len(p) ** (1 / books))
+    if n ** books != len(p):
+        sys.exit(f"error: {len(p)} slots cannot be split into {books} equal codebooks")
+    P = p.reshape((n,) * books)
+    return np.stack([P.sum(axis=tuple(j for j in range(books) if j != i)) for i in range(books)])
+
+
+# --------------------------------------------------------------------------- #
+# Write-distribution panels
+# --------------------------------------------------------------------------- #
+def draw_no_writes(ax, g: Group):
+    ax.text(0.5, 0.5, "no write data\n(only FwPKM has addressable slots)", ha="center", va="center",
+            transform=ax.transAxes, color="gray", fontsize=9)
+    ax.set_title(g.title, fontsize=10)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+def draw_writes(ax, g: Group, color, ymax: float, opts: dict):
+    p = write_distribution(g, opts["writes_by"])
+    N = len(p)
+    bars, binw = bar_values(p, opts["writes_order"], opts["max_bars"])
+    ax.bar(np.arange(len(bars)), bars, width=1.0, color=color, linewidth=0)
+    ax.axhline(binw / N, color="k", ls="--", lw=0.9, label="uniform")
+    ax.set_xlim(-0.5, len(bars) - 0.5)
+    ax.set_ylim(0, ymax)                                   # identical for every group
+    nz = p[p > 0]
+    effective = float(np.exp(-(nz * np.log(nz)).sum()))   # perplexity: rows' worth of uniform spread
+    ax.set_title(f"{g.title}\nwrites per memory row: {len(nz)}/{N} rows used, effective {effective:.0f}",
+                 fontsize=10)
+    if opts["writes_order"] == "rank":
+        ax.set_xlabel("row rank (most written first)" + (f", {binw} rows per bar" if binw > 1 else ""))
+    else:
+        ax.set_xlabel("memory row index" + (f"  ({binw} rows per bar)" if binw > 1 else ""))
+    ax.set_ylabel(f"share of all writes ({opts['writes_by']})")
+    ax.legend(fontsize=8, loc="upper right", framealpha=0.8)
+    ax.grid(alpha=0.3, axis="y")
+
+
+def draw_codebooks(ax, g: Group, ymax: float, opts: dict):
+    M = codebook_marginals(write_distribution(g, opts["writes_by"]), g.key_books)
+    books, n = M.shape
+    cmap = plt.get_cmap("Dark2")
+    width = 0.85 / books
+    x = np.arange(n)
+    for i in range(books):
+        ax.bar(x + (i - (books - 1) / 2) * width, M[i], width=width, color=cmap(i % 8),
+               label=f"codebook {i}" + (" (slowest index)" if i == 0 and books > 1 else ""), linewidth=0)
+    ax.axhline(1 / n, color="k", ls="--", lw=0.9)
+    ax.set_xlim(-0.6, n - 0.4)
+    ax.set_ylim(0, ymax)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.set_title(f"{g.title}\nwrites per sub-key ({books} codebooks x {n} sub-keys)", fontsize=10)
+    ax.set_xlabel("sub-key index within codebook")
+    ax.set_ylabel(f"share of writes using it ({opts['writes_by']})")
+    ax.legend(fontsize=7, loc="upper right", framealpha=0.8, ncols=2 if books > 3 else 1)
+    ax.grid(alpha=0.3, axis="y")
+
+
 # --------------------------------------------------------------------------- #
 # Figure
 # --------------------------------------------------------------------------- #
-def make_figure(groups: list[Group], graphs: list[str], bands: bool, title: str | None):
+DEFAULT_OPTS = {"writes_by": "count", "writes_order": "index", "max_bars": 512}
+
+
+def make_figure(groups: list[Group], graphs: list[str], bands: bool, title: str | None, opts: dict | None = None):
+    opts = {**DEFAULT_OPTS, **(opts or {})}
     R, nrows = len(groups), len(graphs)
     cmap = plt.get_cmap("tab10")
     colors = [cmap(i % 10) for i in range(R)]
@@ -312,6 +426,11 @@ def make_figure(groups: list[Group], graphs: list[str], bands: bool, title: str 
         sys.exit("error: 'training' requested but none of the files contains a training history "
                  "(they were produced without --train-w0)")
 
+    for gr in WRITE_GRAPHS:
+        if gr in graphs and not any(g.write_count is not None for g in groups):
+            sys.exit(f"error: '{gr}' requested but none of the files contains write data "
+                     f"(only FwPKM runs record where keys are written)")
+
     # shared scales across groups
     allL = finite(np.concatenate([g.Lbar.ravel() for g in groups]))
     if allL.size == 0:
@@ -319,6 +438,19 @@ def make_figure(groups: list[Group], graphs: list[str], bands: bool, title: str 
     norm = LogNorm(vmin=allL.min(), vmax=allL.max())
     snap_vals = finite(np.concatenate([g.Lbar[snapshot_rows(g.Lbar.shape[1])].ravel() for g in groups]))
     snap_ylim = (snap_vals.min() / 1.15, snap_vals.max() * 1.15)
+
+    with_writes = [g for g in groups if g.write_count is not None]
+    # y-scales are shared between groups with the same layout (same number of rows / sub-keys);
+    # comparing shares across different layouts on one axis would just squash the larger one
+    write_ymax: dict = {"writes": {}, "codebooks": {}}
+    for g in with_writes:
+        p = write_distribution(g, opts["writes_by"])
+        if "writes" in graphs:
+            top = bar_values(p, opts["writes_order"], opts["max_bars"])[0].max()
+            write_ymax["writes"][len(p)] = max(write_ymax["writes"].get(len(p), 0), 1.08 * top)
+        if "codebooks" in graphs:
+            M = codebook_marginals(p, g.key_books)
+            write_ymax["codebooks"][M.shape[1]] = max(write_ymax["codebooks"].get(M.shape[1], 0), 1.08 * M.max())
 
     fig = plt.figure(figsize=(max(7.5, 4.2 * R), 3.9 * nrows + 0.4), layout="constrained")
     gs = fig.add_gridspec(nrows, R, height_ratios=[1.15 if g == "heatmap" else 1.0 for g in graphs])
@@ -328,9 +460,18 @@ def make_figure(groups: list[Group], graphs: list[str], bands: bool, title: str 
             if graph == "heatmap":
                 ims = [draw_heatmap(ax, g, norm) for ax, g in zip(axes, groups)]
                 fig.colorbar(ims[0], ax=axes, label="MSE", shrink=0.9)
-            else:
+            elif graph == "snapshots":
                 for ax, g in zip(axes, groups):
                     draw_snapshots(ax, g, snap_ylim)
+            else:
+                for ax, g, c in zip(axes, groups, colors):
+                    if g.write_count is None:
+                        draw_no_writes(ax, g)
+                    elif graph == "writes":
+                        draw_writes(ax, g, c, write_ymax["writes"][g.write_count.shape[1]], opts)
+                    else:
+                        n_sub = round(g.write_count.shape[1] ** (1 / g.key_books))
+                        draw_codebooks(ax, g, write_ymax["codebooks"][n_sub], opts)
         else:
             ax = fig.add_subplot(gs[row, :])
             if graph == "forgetting":
@@ -354,6 +495,12 @@ def main(argv=None):
     ap.add_argument("--title", help="figure title")
     ap.add_argument("--bands", action="store_true", help="'time' graph: shade +-1 s.e.m. over sequences")
     ap.add_argument("--dpi", type=int, default=150)
+    ap.add_argument("--writes-by", choices=("count", "weight"), default="count",
+                    help="'writes'/'codebooks': count every selection once, or weight it by its softmax weight")
+    ap.add_argument("--writes-order", choices=("index", "rank"), default="index",
+                    help="'writes': bars in row-index order, or sorted most-written first")
+    ap.add_argument("--max-bars", type=int, default=512,
+                    help="'writes': merge neighbouring rows if there are more rows than this")
     args = ap.parse_args(argv)
 
     graphs = list(dict.fromkeys(args.graphs))                    # drop duplicates, keep order
@@ -361,7 +508,8 @@ def main(argv=None):
     for g in groups:
         print(f"group '{g.label}': {len(g.files)} file(s) "
               f"[{', '.join(f.stem for f in g.files)}], {g.L.shape[1]} sequences")
-    fig = make_figure(groups, graphs, args.bands, args.title)
+    fig = make_figure(groups, graphs, args.bands, args.title,
+                      dict(writes_by=args.writes_by, writes_order=args.writes_order, max_bars=args.max_bars))
     fig.savefig(args.out, dpi=args.dpi, bbox_inches="tight")
     print(f"saved {args.out}")
 
