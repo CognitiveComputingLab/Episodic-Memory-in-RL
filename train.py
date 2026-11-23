@@ -3,12 +3,15 @@ from tqdm import tqdm
 
 from configs import RunConfig
 from models import BaseModel
+from reproducibility import seed_everything
 
 def train(config: RunConfig):
     model_config = config.model
     env_config = config.envionment
     train_config = config.trainer
     dataset_config = config.dataset
+
+    seed_everything(train_config.seed)
 
     tqdm.write("Loading model...")
 

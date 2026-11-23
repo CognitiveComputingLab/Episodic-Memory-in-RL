@@ -35,9 +35,9 @@ class EpisodeDataset(IterableDataset):
         return obs, ep.actions, rtg, mask
 
     def __iter__(self):
-        worker_info = torch.utils.data.get_worker_info()
+        seed = torch.initial_seed()
         rng = np.random.default_rng(
-            seed=worker_info.id if worker_info is not None else 0
+            seed=seed
         )
         while True:
             idx = int(rng.choice(self.episode_indices, p=self.sample_prob))

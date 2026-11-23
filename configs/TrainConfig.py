@@ -11,6 +11,7 @@ class TrainConfig(ABC):
     batches: int
     batch_size: int
 
+    seed: int
     eval_seed: int
     eval_every: int
     eval_eps: int

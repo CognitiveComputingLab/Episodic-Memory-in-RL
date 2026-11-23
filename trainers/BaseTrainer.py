@@ -13,6 +13,7 @@ from configs import DatasetConfig, EnvConfig, ModelConfig, TrainConfig
 from environments.wrappers.ObsNormalise import ObsNormaliseWrapper
 from environments.wrappers.RewardScale import RewardScaleWrapper
 from models import BaseModel
+from reproducibility import seed_worker
 
 T = TypeVar('T', bound=TrainConfig)
 
@@ -44,11 +45,15 @@ class BaseTrainer(ABC, Generic[T]):
         tqdm.write("Loading data...")
         data_source = env_config.get_datasource()
         dataset = dataset_config.get_dataset(data_source, env_config.reward_scaling)
+        data_generator = torch.Generator()
+        data_generator.manual_seed(train_config.seed)
         dataloader = DataLoader(
             dataset=dataset,
             batch_size=train_config.batch_size,
             num_workers=dataset_config.workers,
             collate_fn=dataset_config.get_collate_fn(),
+            worker_init_fn=seed_worker,
+            generator=data_generator,
             pin_memory=True,
             prefetch_factor=4 if dataset_config.workers > 0 else None,
             persistent_workers=True if dataset_config.workers > 0 else False
@@ -103,7 +108,10 @@ class BaseTrainer(ABC, Generic[T]):
                 if i % train_config.eval_every == 0:
                     state = model.get_states()
                     
-                    returns = [model.sample(eval_env, train_config.target_return) for _ in range(train_config.eval_eps)]
+                    returns = [
+                        model.sample(eval_env, train_config.target_return)
+                        for _ in range(train_config.eval_eps)
+                    ]
                     mean_return = sum(returns) / len(returns)
 
                     pbar.write(f"Batch {i}: mean return = {mean_return:.2f}")

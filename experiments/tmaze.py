@@ -8,7 +8,7 @@ from train import train
 
 def run(id: int):
 
-    
+    """
     model_config = DTi_Config(
             context_len=5,
             layers=3,
@@ -22,7 +22,6 @@ def run(id: int):
             torch_compile=False
         )
     
-
     """
     model_config = TBD_Config(
             context_len=5,
@@ -39,7 +38,6 @@ def run(id: int):
             lr_V=0.5,
             lr_R=1
         )
-    """
 
     
     env_config = XMazeConfig(
@@ -58,10 +56,11 @@ def run(id: int):
     )
 
     train_config = EpisodeTrainConfig(
-        detach_every=None,
+        detach_every=1,
         lr=1e-4,
-        batches=1000,
+        batches=5000,
         batch_size=64,
+        seed=id,
         eval_seed=42,
         eval_every=100,
         eval_eps=15,
@@ -70,7 +69,7 @@ def run(id: int):
         device='cuda',
         do_wandb=True,
         project_name='tmaze_new',
-        group_name='DTi',
+        group_name='TBD_no_bptt',
         run_name=f'run_{id}',
         checkpoint_every=100,
         checkpoint_path=f'./checkpoints/run_{id}',

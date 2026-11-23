@@ -79,6 +79,8 @@ class TBD_Block(nn.Module, Cacheful):
             
             lr_det = lr.detach()
 
+
+
             x_hat = self.v_inverse(v.detach())
             r_loss = (lr_det * F.mse_loss(x_hat, x.detach(), reduction='none').mean(-1, keepdim = True)).mean()   # experiment with using lr here
             self.r_loss = r_loss if not self.r_loss else self.r_loss + r_loss
