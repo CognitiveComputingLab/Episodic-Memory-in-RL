@@ -14,14 +14,29 @@ from environments.wrappers.ObsNormalise import ObsNormaliseWrapper
 from environments.wrappers.RewardScale import RewardScaleWrapper
 from models import BaseModel
 from reproducibility import seed_worker
+from trainers.TrainingContracts import OptimizationPolicy, TrainingExtension
 
 T = TypeVar('T', bound=TrainConfig)
 
 class BaseTrainer(ABC, Generic[T]):
     
-    def __init__(self, train_config: T) -> None:
+    def __init__(
+            self,
+            train_config: T,
+            extensions: tuple[TrainingExtension, ...] = ()) -> None:
         super().__init__()
         self.train_config: T = train_config
+        self.training_extensions: list[TrainingExtension] = []
+        for extension in extensions:
+            self.add_training_extension(extension)
+
+    def add_training_extension(self, extension: TrainingExtension) -> None:
+        """Attach an optional feature without changing the base training pipeline."""
+        extension.attach(self)
+        self.training_extensions.append(extension)
+
+    def remove_training_extension(self, extension: TrainingExtension) -> None:
+        self.training_extensions.remove(extension)
     
     def train(
             self, 
@@ -68,14 +83,27 @@ class BaseTrainer(ABC, Generic[T]):
 
         tqdm.write("Initialising Optimiser...")
         self.optim = torch.optim.AdamW(model.parameters(), lr=train_config.lr)
+        self.optimization = OptimizationPolicy(self.optim, train_config.grad_clip)
 
         start_batch = 0
         resume_from = None
         if train_config.resume_from is not None:
             tqdm.write(f"Resuming from {train_config.resume_from}...")
             checkpoint = torch.load(train_config.resume_from, map_location=self.device)
+            format_version = checkpoint.get("runtime_state_format")
+            if format_version not in (None, "episodic-memory-in-rl-v1"):
+                raise ValueError(
+                    f"Incompatible runtime-state format: {format_version!r}"
+                )
             model.load_state_dict(checkpoint["model_state"])
             self.optim.load_state_dict(checkpoint["optim_state"])
+            if "runtime_state" in checkpoint:
+                model.set_states(checkpoint["runtime_state"])
+            extension_state = checkpoint.get("extension_state", {})
+            for extension in self.training_extensions:
+                name = type(extension).__name__
+                if name in extension_state:
+                    extension.restore_checkpoint(extension_state[name])
             start_batch = checkpoint["batch"] + 1
             #resume_from = f"{checkpoint["wandb_id"]}?_step={start_batch}"      # Email wandb to enable
 
@@ -100,7 +128,11 @@ class BaseTrainer(ABC, Generic[T]):
                   initial=start_batch,
                   total=train_config.batches) as pbar:
             for i in pbar:
+                for extension in self.training_extensions:
+                    extension.before_batch(self)
                 loss = self.iter()
+                for extension in self.training_extensions:
+                    extension.after_batch(self, loss)
 
                 pbar.set_postfix(loss=f"{loss:.4f}")
                 wandb.log({"train/loss": loss}, step=i)
@@ -129,7 +161,20 @@ class BaseTrainer(ABC, Generic[T]):
                         "batch": i,
                         "model_state": model.state_dict(),
                         "optim_state": self.optim.state_dict(),
-                        "wandb_id": wandb.run.id
+                        "wandb_id": wandb.run.id,
+                        "runtime_state": model.get_states(),
+                        "runtime_state_format": "episodic-memory-in-rl-v1",
+                        "extension_state": {
+                            type(extension).__name__: extension.checkpoint_state()
+                            for extension in self.training_extensions
+                        },
+                        "seed": train_config.seed,
+                        "config": {
+                            "model": model_config.__dict__,
+                            "env": env_config.__dict__,
+                            "train": train_config.__dict__,
+                            "dataset": dataset_config.__dict__,
+                        },
                     }
                     torch.save(checkpoint, os.path.join(train_config.checkpoint_path, "checkpoint_" + str(i) + ".pt"))
                     torch.save(checkpoint, os.path.join(train_config.checkpoint_path, "checkpoint_latest.pt"))

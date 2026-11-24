@@ -1,5 +1,3 @@
-import random
-
 import numpy as np
 import torch
 from torch.utils.data import IterableDataset
@@ -56,11 +54,12 @@ class SubsequenceDataset(IterableDataset):
         return s_obs, s_actions, s_rtg, timesteps, mask
 
     def __iter__(self):
-
+        seed = torch.initial_seed()
+        rng = np.random.default_rng(seed=seed)
         while True:
-            idx = random.randint(0, self.num_episodes-1)
+            idx = int(rng.choice(self.num_episodes, p=self.sample_prob))
             ep_len = int(self.source.episode_lens()[idx])
-            start  = random.randint(0, max(ep_len - 1, 0))
+            start = int(rng.integers(0, max(ep_len, 1)))
             yield self._process(idx, start)
 
     @staticmethod

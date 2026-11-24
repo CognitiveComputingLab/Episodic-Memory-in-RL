@@ -1,4 +1,7 @@
 #!/bin/bash
+set -euo pipefail
+
+
 
 # --- SLURM Settings ---
 #SBATCH -N 1                            # Nodes
@@ -27,5 +30,10 @@ echo "CUDA_VISIBLE_DEVICES: $CUDA_VISIBLE_DEVICES"
 
 
 mkdir -p logs
+if [[ $# -lt 1 ]]; then
+    echo "Usage: sbatch run_experiment.sh EXPERIMENT_MODULE" >&2
+    exit 2
+fi
+
 python3 run_experiment.py "$1"
 echo "Job finished at: $(date)"

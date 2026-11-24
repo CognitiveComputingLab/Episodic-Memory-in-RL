@@ -1,0 +1,36 @@
+[project]
+name = "episodic-memory-in-rl"
+version = "0.1.0"
+description = "Exploration of episodic memory approaches for reinforcement learning."
+requires-python = ">=3.10"
+dependencies = [
+    "einops",
+    "gymnasium",
+    "matplotlib",
+    "minari",
+    "numpy",
+    "tqdm",
+    "wandb",
+    "torch>=2.11.0",
+    "tensordict",
+    "xmaze-jetcobblestone>=0.0.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "testpypi"
+url = "https://test.pypi.org/simple/"
+explicit = true
+
+[tool.uv.sources]
+xmaze-jetcobblestone = { index = "testpypi" }

@@ -26,6 +26,11 @@ class DTi_Config(DT_Config):
     num_persistent: int
     mini_batch_size: int
 
+    @property
+    def memory_update_interval(self) -> int:
+        """Number of residual-stream tokens between fast-memory writes."""
+        return self.mini_batch_size
+
     def get_model(self, env_config: EnvConfig):
         from models.DT.embeddings import ActionEmbed, RTG_Embed, StateEmbed, TimeEmbed, ActionUnembed
 
@@ -52,7 +57,7 @@ class DTi_Config(DT_Config):
             raise ValueError(layout_id + " is not a registered layout.")
         fn = _LAYOUTS[layout_id]
         needed = inspect.signature(fn).parameters.keys()
-        missing = needed - vars(config).keys()
+        missing = {name for name in needed if not hasattr(config, name)}
         if missing:
             raise TypeError(f"layout '{layout_id}' needs {missing}, not found on {type(config).__name__}")
         return fn(**{name: getattr(config, name) for name in needed})

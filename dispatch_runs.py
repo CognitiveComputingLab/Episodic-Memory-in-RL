@@ -9,6 +9,10 @@ if __name__ == "__main__":
     p.add_argument("--time", default="00:30:00")
     p.add_argument("--no-slurm", action="store_true")
     args = p.parse_args()
+    if args.n < 1:
+        p.error("n must be at least 1")
+    if args.max_concurrent < 1:
+        p.error("--max-concurrent must be at least 1")
 
     if not args.no_slurm:
         name = args.experiment.split(".")[-1]

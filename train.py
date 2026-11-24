@@ -7,7 +7,7 @@ from reproducibility import seed_everything
 
 def train(config: RunConfig):
     model_config = config.model
-    env_config = config.envionment
+    env_config = config.environment
     train_config = config.trainer
     dataset_config = config.dataset
 
@@ -20,4 +20,6 @@ def train(config: RunConfig):
         torch._dynamo.config.allow_unspec_int_on_nn_module = True
         model.compile()
 
-    train_config.get_trainer().train(model, model_config, env_config, dataset_config)
+    return train_config.get_trainer().train(
+        model, model_config, env_config, dataset_config
+    )
