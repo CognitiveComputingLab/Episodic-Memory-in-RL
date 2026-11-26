@@ -7,14 +7,14 @@ from einops import rearrange
 from tensordict import TensorDict, is_tensor_collection
 from torch.func import functional_call, grad
 
-from typing import Any, Optional, cast
+from typing import Optional, cast
 
 from models import Stateful
-from models.modules.TTT import MemoryModule
+from models.modules.TTT import MemoryModule, FlattenableState, TrackableState
 
 TitansMemoryState = tuple[Optional[TensorDict],Optional[TensorDict]]
 
-class TitansMemory(MemoryModule, Stateful[TitansMemoryState]):
+class TitansMemory(MemoryModule, Stateful[TitansMemoryState], FlattenableState, TrackableState):
 
     def __init__(self, e_dim: int, lr: float, memoryModule: nn.Module, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -86,3 +86,25 @@ class TitansMemory(MemoryModule, Stateful[TitansMemoryState]):
             assert self.momentum_state is not None
             self.memory_state = self.memory_state.detach()
             self.momentum_state = self.momentum_state.detach()
+
+
+    def _leaves(self) -> list[Tensor]:
+        assert self.memory_state is not None and self.momentum_state is not None
+        return [v for td in (self.memory_state, self.momentum_state) for v in td.values()]
+
+    def flat_state(self) -> Tensor:                      # [b, 2P], keeps graph
+        return torch.cat([v.flatten(1) for v in self._leaves()], dim=1)
+
+    def track_state(self) -> list[Tensor]:
+        """Call at chunk start so .grad is available on the carried state after backward."""
+        leaves = self._leaves()
+        for v in leaves:
+            if v.requires_grad:
+                v.retain_grad()      # fresh/reset state: non-leaf attached to the init params
+            else:
+                v.requires_grad_()   # state that was detached after the last chunk
+        return leaves
+    
+    def flat_size(self) -> int:
+        # memory state + momentum state
+        return sum(p.numel() for p in self.memoryModule.parameters()) * 2

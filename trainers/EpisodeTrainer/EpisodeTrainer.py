@@ -11,54 +11,35 @@ class EpisodeTrainer(BaseTrainer[EpisodeTrainConfig]):
         self.detach_every = train_config.detach_every
 
     def iter(self) -> float:
+        s, a, r, t, m = tuple(t.to(self.device, non_blocking=True) for t in next(self.iter_data))
+        
 
-        batch = TrainingBatch.from_collated(next(self.iter_data))
-        batch = TrainingBatch(
-            *(
-                tensor.to(self.device, non_blocking=True)
-                for tensor in (
-                    batch.states,
-                    batch.actions,
-                    batch.returns,
-                    batch.timesteps,
-                    batch.mask,
-                )
-            )
-        )
         self.model.reset_states(self.train_config.batch_size)
-        a_preds = []
+        
 
-        s, a, r, t, m = (
-            batch.states,
-            batch.actions,
-            batch.returns,
-            batch.timesteps,
-            batch.mask,
-        )
+        C, T = self.model_config.context_len, s.shape[1]
+        steps = [StepSpec(start=i, end=min(i + C, T)) for i in range(0, T, C)]
+        per_window = self.detach_every or len(steps)       # None -> one window = full BPTT
+        windows = [steps[i:i + per_window] for i in range(0, len(steps), per_window)]
 
-        steps = [
-            StepSpec(
-                start=i,
-                end=min(i + self.model_config.context_len, s.shape[1]),
-                detach_state=(
-                    self.detach_every is not None
-                    and i % (self.detach_every * self.model_config.context_len) == 0
-                ),
-            )
-            for i in range(0, s.shape[1], self.model_config.context_len)
-        ]
-        for step in steps:
-            if step.detach_state:
-                self.model.detach_states()
-            sc, ac, rc, tc, mt = tuple(
-                x[:, step.start:step.end] for x in (s, a, r, t, m)
-            )
-            a_preds.append(self.model(rc, sc, ac, tc))
+        n_total = m.sum()
+        total_loss = torch.zeros((), device=self.device)
+        self.optimization.zero_grad()
 
-        a_pred = torch.cat(a_preds, dim=1)
+        for window in windows:
+            self.model.detach_states()                     # truncation point (as before, incl. step 0)
+            preds = []
+            for step in window:
+                sl = slice(step.start, step.end)
+                preds.append(self.model(r[:, sl], s[:, sl], a[:, sl], t[:, sl]))
 
-        loss = self.model.loss(a, a_pred, m)
-        return self.optimization.step(
-            {"primary": loss},
-            self.model.parameters(),
-        )
+            lo, hi = window[0].start, window[-1].end
+            m_w = m[:, lo:hi]
+            if m_w.sum() == 0:                             # fully padded window: model.loss would be 0/0
+                continue
+            loss_w = self.model.loss(a[:, lo:hi], torch.cat(preds, dim=1), m_w) * (m_w.sum() / n_total)
+
+            self.optimization.backward(loss_w)             # frees this window's graph
+            total_loss += loss_w.detach()
+
+        return self.optimization.apply(self.model.parameters(), total_loss)

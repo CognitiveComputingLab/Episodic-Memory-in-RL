@@ -1,7 +1,4 @@
 #!/bin/bash
-set -euo pipefail
-
-
 
 # --- SLURM Settings ---
 #SBATCH -N 1                            # Nodes

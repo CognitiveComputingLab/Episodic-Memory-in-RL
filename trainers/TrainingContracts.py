@@ -90,3 +90,18 @@ class OptimizationPolicy:
             torch.nn.utils.clip_grad_norm_(parameter_list, self.grad_clip)
         self.optimizer.step()
         return float(primary.detach().item())
+
+    def zero_grad(self) -> None:
+        self.optimizer.zero_grad()
+
+    def backward(self, loss: Tensor) -> None:
+        if not torch.isfinite(loss):
+            raise FloatingPointError("Loss is non-finite")
+        loss.backward()
+
+    def apply(self, parameters: Iterable[torch.nn.Parameter], reported_loss: Tensor) -> float:
+        parameter_list = list(parameters)
+        if self.grad_clip is not None:
+            torch.nn.utils.clip_grad_norm_(parameter_list, self.grad_clip)
+        self.optimizer.step()
+        return float(reported_loss.item())

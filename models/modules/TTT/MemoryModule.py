@@ -9,3 +9,4 @@ class MemoryModule(torch.nn.Module, ABC):
     @abstractmethod
     def write(self, x: Any) -> Any:
         pass
+    

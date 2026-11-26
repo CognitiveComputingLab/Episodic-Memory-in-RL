@@ -1,12 +1,13 @@
-from typing import Optional
+from typing import Callable, Optional
 
 from einops import rearrange
 import torch
 import torch.nn as nn
 from torch import Tensor
 from models import Cacheful
-from models.modules.TTT import MemoryFactory, titans_mlp, MemoryModule
+from models.modules.TTT import TrackableState, FlattenableState, MemoryFactory, titans_mlp, MemoryModule
 from models.modules.Transformer import Attention, grouped_causal
+
 
 class SG_Block(nn.Module, Cacheful):
     """
@@ -50,23 +51,18 @@ class SG_Block(nn.Module, Cacheful):
         self.q_proj = nn.Linear(e_dim, e_dim)
         self.lr_proj: nn.Module = nn.Sequential(nn.Linear(e_dim, 1), nn.Sigmoid())
 
+        self.tracked_states = []
+        self.sg_scale = 1
+
         # Take whole memory module as input
-        p = sum(p.numel() for p in self.mem.parameters())
+        assert isinstance(self.mem, FlattenableState)
+        assert isinstance(self.mem, TrackableState) 
+        p = self.mem.flat_size()
         self.grads_pred: nn.Module = nn.Sequential(
             nn.Linear(p, 8),
             nn.GELU(),
             nn.Linear(8,p)
         )
-
-    def predict_gradient(self, state_descriptor: Tensor) -> Tensor:
-        """Predict a flat memory gradient descriptor with a shape-checked interface."""
-        if state_descriptor.shape[-1] != self.grads_pred[0].in_features:
-            raise ValueError(
-                "Synthetic-gradient state descriptor size "
-                f"{state_descriptor.shape[-1]} does not match "
-                f"{self.grads_pred[0].in_features}"
-            )
-        return self.grads_pred(state_descriptor)
 
     def read(self, x: Tensor):
         q = self.q_proj(x)
@@ -123,3 +119,30 @@ class SG_Block(nn.Module, Cacheful):
 
     def enable_cache(self, use_cache: bool) -> None:
         super().enable_cache(use_cache)
+
+
+
+    def track_state(self):
+        tensors = self.mem.track_state()    # list of tensors
+        self.tracked_states.append(tensors)
+
+    def future_loss(self):
+        flat_state = self.mem.flat_state()
+        ghat = self.grads_pred(flat_state.detach())      # synthetic grad
+        return self.sg_scale * (flat_state * ghat.detach()).sum()
+
+    def sg_loss(self, loss_fn: Callable[[Tensor, Tensor], Tensor]):
+        state_in = torch.cat([torch.cat([v.flatten(1) for v in leaves], dim=1) for leaves in self.tracked_states[:-1]], dim=0)
+        target = torch.cat([torch.cat([
+                    (t.grad if t.grad is not None else torch.zeros_like(t)).flatten(1) for t in leaves
+                ], dim=1) for leaves in self.tracked_states[1:]], dim=0)
+
+        pred = self.grads_pred(state_in.detach())
+        self.tracked_states = []
+        return loss_fn(pred, target)
+        
+        
+
+
+
+

@@ -8,7 +8,6 @@ from train import train
 
 def run(id: int):
 
-    
     model_config = DTi_Config(
             context_len=5,
             layers=3,
@@ -50,7 +49,7 @@ def run(id: int):
         possible_instructions=2,
         min_corridor_len=6,    # 6
         max_corridor_len=7,    # 7
-        episodes=64,            # 1000
+        episodes=1000,            # 1000
         clip=None,
         encoding="onehot_repeat",
         instruction_every=1
@@ -59,7 +58,7 @@ def run(id: int):
     train_config = EpisodeTrainConfig(
         detach_every=None,
         lr=1e-4,
-        batches=1000,
+        batches=2000,
         batch_size=64,
         seed=id,
         eval_seed=42,
