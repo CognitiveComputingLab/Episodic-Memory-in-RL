@@ -6,8 +6,8 @@ from trainers.TrainingContracts import StepSpec, TrainingBatch
 
 class EpisodeTrainer(BaseTrainer[EpisodeTrainConfig]):
 
-    def __init__(self, train_config: EpisodeTrainConfig) -> None:
-        super().__init__(train_config)
+    def __init__(self, train_config: EpisodeTrainConfig, extensions = None) -> None:
+        super().__init__(train_config, extensions)
         self.detach_every = train_config.detach_every
 
     def iter(self) -> float:

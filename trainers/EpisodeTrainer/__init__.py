@@ -1,2 +1,4 @@
+from .SyntheticGradientExtension import SyntheticGradientExtension
 from .EpisodeTrainConfig import EpisodeTrainConfig
 from .EpisodeTrainer import EpisodeTrainer
+from .EpisodeSyntheticGradientTrainer import EpisodeSyntheticGradientTrainer

@@ -17,7 +17,7 @@ def run(id: int):
             titan_layers=[1],
             num_persistent=1,
             mini_batch_size=15,  # raw token count
-            block_layout="mal_blocks",
+            block_layout="sg_blocks",
             torch_compile=False
         )
     
@@ -49,14 +49,14 @@ def run(id: int):
         possible_instructions=2,
         min_corridor_len=6,    # 6
         max_corridor_len=7,    # 7
-        episodes=1000,            # 1000
+        episodes=64,            # 1000
         clip=None,
         encoding="onehot_repeat",
         instruction_every=1
     )
 
     train_config = EpisodeTrainConfig(
-        detach_every=None,
+        detach_every=1,
         lr=1e-4,
         batches=2000,
         batch_size=64,
@@ -67,13 +67,14 @@ def run(id: int):
         target_return=0,
         grad_clip=1,
         device='cuda',
-        do_wandb=False,
+        do_wandb=True,
         project_name='tmaze_new',
-        group_name='DTi',
+        group_name='sgs',
         run_name=f'run_{id}',
         checkpoint_every=100,
         checkpoint_path=f'./checkpoints/run_{id}',
-        resume_from=None
+        resume_from=None,
+        synthetic_grads=True
     )
 
     dataset_config = EpisodeDatasetConfig(

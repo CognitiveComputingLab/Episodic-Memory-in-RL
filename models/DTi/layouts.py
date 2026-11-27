@@ -74,7 +74,6 @@ def sg_blocks(
         memory_update_interval: int,
         titan_layers: list[int]
 ):
-    """Construct Titans blocks with the synthetic-gradient block contract."""
     return nn.ModuleList([
         TransformerBlock(
             w_size=context_len * 3,

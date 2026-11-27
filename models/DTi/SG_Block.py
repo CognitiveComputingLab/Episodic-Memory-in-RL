@@ -63,6 +63,10 @@ class SG_Block(nn.Module, Cacheful):
             nn.GELU(),
             nn.Linear(8,p)
         )
+        # init last layer of grad predictor as 0s
+        nn.init.zeros_(self.grads_pred[-1].weight)
+        nn.init.zeros_(self.grads_pred[-1].bias)
+
 
     def read(self, x: Tensor):
         q = self.q_proj(x)
@@ -132,10 +136,11 @@ class SG_Block(nn.Module, Cacheful):
         return self.sg_scale * (flat_state * ghat.detach()).sum()
 
     def sg_loss(self, loss_fn: Callable[[Tensor, Tensor], Tensor]):
-        state_in = torch.cat([torch.cat([v.flatten(1) for v in leaves], dim=1) for leaves in self.tracked_states[:-1]], dim=0)
+
+        state_in = torch.cat([torch.cat([v.flatten(1) for v in leaves], dim=1) for leaves in self.tracked_states], dim=0)
         target = torch.cat([torch.cat([
                     (t.grad if t.grad is not None else torch.zeros_like(t)).flatten(1) for t in leaves
-                ], dim=1) for leaves in self.tracked_states[1:]], dim=0)
+                ], dim=1) for leaves in self.tracked_states], dim=0)
 
         pred = self.grads_pred(state_in.detach())
         self.tracked_states = []

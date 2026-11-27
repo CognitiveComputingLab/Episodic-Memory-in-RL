@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Optional
 
 import torch
 from torch import Tensor
@@ -53,6 +53,9 @@ class TrainingExtension(ABC):
     def after_batch(self, trainer: "BaseTrainer", primary_loss: float) -> None:
         pass
 
+    def log_step(self, trainer: "BaseTrainer") -> Optional[dict[str, Tensor]]:
+        return None
+
     @abstractmethod
     def checkpoint_state(self) -> dict[str, object]:
         pass
@@ -90,6 +93,7 @@ class OptimizationPolicy:
             torch.nn.utils.clip_grad_norm_(parameter_list, self.grad_clip)
         self.optimizer.step()
         return float(primary.detach().item())
+
 
     def zero_grad(self) -> None:
         self.optimizer.zero_grad()

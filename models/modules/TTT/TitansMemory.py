@@ -54,7 +54,10 @@ class TitansMemory(MemoryModule, Stateful[TitansMemoryState], FlattenableState, 
     def _fresh_state(self, n: int) -> tuple[TensorDict, TensorDict]:
         params = cast(TensorDict, TensorDict.from_module(self.memoryModule))    # Create a fresh copy of the memory module
         memory = params.expand(n, *params.shape).clone().flatten_keys(".")      # Each batch needs a different copy
-        momentum = TensorDict.new_zeros(memory)
+        #momentum = TensorDict.new_zeros(memory)
+        momentum = memory.new_zeros(n) 
+
+
         return memory, momentum
 
     def reset_state(self, batch: int) -> None:

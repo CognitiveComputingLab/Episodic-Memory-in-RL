@@ -142,7 +142,13 @@ class BaseTrainer(ABC, Generic[T]):
                     extension.after_batch(self, loss)
 
                 pbar.set_postfix(loss=f"{loss:.4f}")
-                wandb.log({"train/loss": loss}, step=i)
+
+                step_log = {"train/loss": loss}
+                for extension in self.training_extensions:
+                    log = extension.log_step(self)
+                    if log:
+                        step_log.update(log)
+                wandb.log(step_log, step=i)
 
                 if i % train_config.eval_every == 0:
                     state = model.get_states()
